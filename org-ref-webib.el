@@ -55,6 +55,10 @@
   (interactive)
   (org-ref-webib-arxiv-get-pdf-add-bibtex-entry (org-mac-firefox-get-frontmost-url)))
 
+(defun org-ref-webib-arxiv-get-pdf-add-bibtex-entry-from-chrome ()
+  (interactive)
+  (org-ref-webib-arxiv-get-pdf-add-bibtex-entry (org-mac-chrome-get-frontmost-url)))
+
 ;; ACL (Mostly adjusted from `org-ref-arxiv.el')
 (defun org-ref-webib-acl-get-bibtex-entry (acl-number)
   (with-current-buffer
@@ -116,6 +120,10 @@
   (interactive)
   (org-ref-webib-acl-get-pdf-add-bibtex-entry (org-mac-firefox-get-frontmost-url)))
 
+(defun org-ref-webib-acl-get-pdf-add-bibtex-entry-from-chrome ()
+  (interactive)
+  (org-ref-webib-acl-get-pdf-add-bibtex-entry (org-mac-chrome-get-frontmost-url)))
+
 (defun org-ref-webib-get-pdf-add-bibtex-entry-dispatcher (link)
   (cond ((string-match "arxiv\\.org" link)
          #'org-ref-webib-arxiv-get-pdf-add-bibtex-entry)
@@ -131,6 +139,11 @@
 (defun org-ref-webib-get-pdf-add-bibtex-entry-from-firefox ()
   (interactive)
   (let ((link (org-mac-firefox-get-frontmost-url)))
+    (funcall (org-ref-get-pdf-add-bibtex-entry-dispatcher link) link)))
+
+(defun org-ref-webib-get-pdf-add-bibtex-entry-from-chrome ()
+  (interactive)
+  (let ((link (org-mac-chrome-get-frontmost-url)))
     (funcall (org-ref-get-pdf-add-bibtex-entry-dispatcher link) link)))
 
 (provide 'org-ref-webib)
