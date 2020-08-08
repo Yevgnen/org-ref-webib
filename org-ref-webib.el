@@ -40,7 +40,7 @@
             (let ((arxiv-number (match-string 1 location))
                   (default-biblio (car org-ref-default-bibliography)))
               (unwind-protect
-                  (cl-letf (((symbol-function #'org-ref-pdf-p) (lambda (&rest _) nil)))
+                  (cl-letf (((symbol-function #'org-open-file) (lambda (&rest _) nil)))
                     (arxiv-get-pdf-add-bibtex-entry arxiv-number
                                                     default-biblio
                                                     org-ref-pdf-directory))
