@@ -93,9 +93,9 @@
   (let ((pdf-url (format "https://www.aclweb.org/anthology/%s.pdf" acl-number)))
     (url-copy-file pdf-url pdf)
     ;; now check if we got a pdf
-    (if (and (org-ref-pdf-p pdf)
-             open)
-        (org-open-file pdf)
+    (if (org-ref-pdf-p pdf)
+        (if open
+            (org-open-file pdf))
       (delete-file pdf 'trash)
       (message "Error downloading arxiv ACL %s" pdf-url))))
 
