@@ -124,27 +124,97 @@
   (interactive)
   (org-ref-webib-acl-get-pdf-add-bibtex-entry (org-mac-chrome-get-frontmost-url)))
 
+;; NIPS (Mostly adjusted from `org-ref-arxiv.el')
+(defun org-ref-webib-nips-get-bibtex-entry (nips-number)
+  (print (format "https://papers.nips.cc/paper/%s/bibtex" nips-number))
+  (with-current-buffer
+      (url-retrieve-synchronously
+       (format "https://papers.nips.cc/paper/%s/bibtex" nips-number)
+       t)
+    (goto-char url-http-end-of-headers)
+    (substring-no-properties (buffer-string) (point))))
+
+(defun org-ref-webib-nips-add-bibtex-entry (nips-number bibfile)
+  (interactive
+   (list (read-string "NIPS: ")
+         (completing-read
+          "Bibfile: "
+          (append (f-entries "." (lambda (f) (f-ext? f "bib")))
+                  org-ref-default-bibliography))))
+  (save-window-excursion
+    (find-file bibfile)
+    (goto-char (point-max))
+    (when (not (looking-at "^")) (insert "\n"))
+    (insert (org-ref-webib-nips-get-bibtex-entry nips-number))
+    (org-ref-clean-bibtex-entry)
+    (bibtex-beginning-of-entry)
+    (let ((key (bibtex-completion-get-value "=key=" (bibtex-parse-entry))))
+      (goto-char (point-max))
+      (when (not (looking-at "^")) (insert "\n"))
+      (save-buffer)
+      key)))
+
+(defun org-ref-webib-nips-get-pdf (nips-number pdf &optional open)
+  (interactive "sNIPS: \nsPDF: ")
+  (let ((pdf-url (format "https://papers.nips.cc/paper/%s.pdf" nips-number)))
+    (url-copy-file pdf-url pdf)
+    ;; now check if we got a pdf
+    (if (org-ref-pdf-p pdf)
+        (if open
+            (org-open-file pdf))
+      (delete-file pdf 'trash)
+      (message "Error downloading NIPS %s" pdf-url))))
+
+(defun org-ref-webib-nips-get-pdf-add-bibtex-entry (link)
+  (if (string-match org-bracket-link-regexp link)
+      (let ((location (match-string 1 link)))
+        (if (string-match "papers\\.nips\\.cc/paper/\\([^/]+\\)\\(?:/bibtex|\\.pdf\\)?" location)
+            (let ((nips-number (match-string 1 location))
+                  (default-biblio (car org-ref-default-bibliography)))
+              (unwind-protect
+                  (let* ((key (org-ref-webib-nips-add-bibtex-entry nips-number default-biblio))
+                         (pdf-file (expand-file-name (format "%s.pdf" key) org-ref-pdf-directory)))
+                    (org-ref-webib-nips-get-pdf nips-number pdf-file))
+                (find-file-other-window default-biblio)))
+          (user-error "Not a NIPS page: %s." location)))))
+
+(defun org-ref-webib-nips-get-pdf-add-bibtex-entry-from-safari ()
+  (interactive)
+  (org-ref-webib-nips-get-pdf-add-bibtex-entry (org-mac-safari-get-frontmost-url)))
+
+(defun org-ref-webib-nips-get-pdf-add-bibtex-entry-from-firefox ()
+  (interactive)
+  (org-ref-webib-nips-get-pdf-add-bibtex-entry (org-mac-firefox-get-frontmost-url)))
+
+(defun org-ref-webib-nips-get-pdf-add-bibtex-entry-from-chrome ()
+  (interactive)
+  (org-ref-webib-nips-get-pdf-add-bibtex-entry (org-mac-chrome-get-frontmost-url)))
+
+;; Dispatcher
+
 (defun org-ref-webib-get-pdf-add-bibtex-entry-dispatcher (link)
   (cond ((string-match "arxiv\\.org" link)
          #'org-ref-webib-arxiv-get-pdf-add-bibtex-entry)
         ((string-match "aclweb\\.org" link)
          #'org-ref-webib-acl-get-pdf-add-bibtex-entry)
+        ((string-match "nips\\.cc" link)
+         #'org-ref-webib-nips-get-pdf-add-bibtex-entry)
         (t (user-error "Unknown bibtex website: %s" link))))
 
 (defun org-ref-webib-get-pdf-add-bibtex-entry-from-safari ()
   (interactive)
   (let ((link (org-mac-safari-get-frontmost-url)))
-    (funcall (org-ref-get-pdf-add-bibtex-entry-dispatcher link) link)))
+    (funcall (org-ref-webib-get-pdf-add-bibtex-entry-dispatcher link) link)))
 
 (defun org-ref-webib-get-pdf-add-bibtex-entry-from-firefox ()
   (interactive)
   (let ((link (org-mac-firefox-get-frontmost-url)))
-    (funcall (org-ref-get-pdf-add-bibtex-entry-dispatcher link) link)))
+    (funcall (org-ref-webib-get-pdf-add-bibtex-entry-dispatcher link) link)))
 
 (defun org-ref-webib-get-pdf-add-bibtex-entry-from-chrome ()
   (interactive)
   (let ((link (org-mac-chrome-get-frontmost-url)))
-    (funcall (org-ref-get-pdf-add-bibtex-entry-dispatcher link) link)))
+    (funcall (org-ref-webib-get-pdf-add-bibtex-entry-dispatcher link) link)))
 
 (provide 'org-ref-webib)
 
