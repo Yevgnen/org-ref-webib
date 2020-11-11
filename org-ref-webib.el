@@ -126,7 +126,6 @@
 
 ;; NIPS (Mostly adjusted from `org-ref-arxiv.el')
 (defun org-ref-webib-nips-get-bibtex-entry (nips-number)
-  (print (format "https://papers.nips.cc/paper/%s/bibtex" nips-number))
   (with-current-buffer
       (url-retrieve-synchronously
        (format "https://papers.nips.cc/paper/%s/bibtex" nips-number)
