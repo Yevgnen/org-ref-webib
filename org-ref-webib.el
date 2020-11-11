@@ -32,6 +32,28 @@
 (require 'org-ref)
 (require 'org-ref-arxiv)
 
+;; Common utilities.
+
+(defun org-ref-webib-get-pdf (url pdf &optional open)
+  (let ((buf (current-buffer)))
+    (spinner-start 'horizontal-breathing-long)
+    (url-retrieve url
+                  `(lambda (_data)
+                     (let ((coding-system-for-write 'binary))
+                       (delete-region (point-min) url-http-end-of-headers)
+                       (while (looking-at "^$")
+                         (delete-char 1))
+                       (write-region (point-min) (point-max) ,pdf)
+                       (if (org-ref-pdf-p ,pdf)
+                           (progn
+                             (if ,open
+                                 (org-open-file ,pdf))
+                             (message "PDF saved to: %s" ,pdf))
+                         (delete-file ,pdf 'trash)
+                         (user-error "Failed to download pdf: %s" ,url))
+                       (with-current-buffer ,buf
+                         (spinner-stop)))))))
+
 ;; arXiv
 (defun org-ref-webib-arxiv-get-pdf-add-bibtex-entry (link)
   (if (string-match org-bracket-link-regexp link)
@@ -90,14 +112,8 @@
 
 (defun org-ref-webib-acl-get-pdf (acl-number pdf &optional open)
   (interactive "sACL: \nsPDF: ")
-  (let ((pdf-url (format "https://www.aclweb.org/anthology/%s.pdf" acl-number)))
-    (url-copy-file pdf-url pdf)
-    ;; now check if we got a pdf
-    (if (org-ref-pdf-p pdf)
-        (if open
-            (org-open-file pdf))
-      (delete-file pdf 'trash)
-      (message "Error downloading arxiv ACL %s" pdf-url))))
+  (org-ref-webib-get-pdf
+   (format "https://www.aclweb.org/anthology/%s.pdf" acl-number) pdf open))
 
 (defun org-ref-webib-acl-get-pdf-add-bibtex-entry (link)
   (if (string-match org-bracket-link-regexp link)
@@ -154,15 +170,9 @@
       key)))
 
 (defun org-ref-webib-nips-get-pdf (nips-number pdf &optional open)
-  (interactive "sNIPS: \nsPDF: ")
-  (let ((pdf-url (format "https://papers.nips.cc/paper/%s.pdf" nips-number)))
-    (url-copy-file pdf-url pdf)
-    ;; now check if we got a pdf
-    (if (org-ref-pdf-p pdf)
-        (if open
-            (org-open-file pdf))
-      (delete-file pdf 'trash)
-      (message "Error downloading NIPS %s" pdf-url))))
+  (interactive "sACL: \nsPDF: ")
+  (org-ref-webib-get-pdf
+   (format "https://papers.nips.cc/paper/%s.pdf" nips-number) pdf open))
 
 (defun org-ref-webib-nips-get-pdf-add-bibtex-entry (link)
   (if (string-match org-bracket-link-regexp link)
