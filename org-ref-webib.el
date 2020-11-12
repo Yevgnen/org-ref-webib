@@ -3,7 +3,7 @@
 ;; Copyright (C) 2017 Yevgnen Koh
 ;;
 ;; Author: Yevgnen Koh <wherejoystarts@gmail.com>
-;; Version: 1.0.0
+;; Version: 1.1.0
 ;; Package-Requires: ((emacs "25.1") (org-ref "1.1.1"))
 ;; Keywords:
 ;;
@@ -34,196 +34,176 @@
 
 ;; Common utilities.
 
-(defun org-ref-webib-get-pdf (url pdf &optional open)
-  (let ((buf (current-buffer)))
-    (spinner-start 'horizontal-breathing-long)
-    (url-retrieve url
-                  `(lambda (_data)
-                     (let ((coding-system-for-write 'binary))
-                       (delete-region (point-min) url-http-end-of-headers)
-                       (while (looking-at "^$")
-                         (delete-char 1))
-                       (write-region (point-min) (point-max) ,pdf)
-                       (if (org-ref-pdf-p ,pdf)
-                           (progn
-                             (if ,open
-                                 (org-open-file ,pdf))
-                             (message "PDF saved to: %s" ,pdf))
-                         (delete-file ,pdf 'trash)
-                         (user-error "Failed to download pdf: %s" ,url))
-                       (with-current-buffer ,buf
-                         (spinner-stop)))))))
+(defvar org-ref-webib-sites
+  '((acl . (:site "aclweb\\.org"
+                  :key "www\\.aclweb\\.org/.+?/\\([^\\./]+\\)\\(?:/|\\.bib|pdf\\)?"
+                  :bibtex "https://www.aclweb.org/anthology/%s.bib"
+                  :pdf "https://www.aclweb.org/anthology/%s.pdf"))
+    (arxiv . (:site "arxiv\\.org"
+                    :key "/\\(?:abs\\|pdf\\)/\\([0-9]+\\.[0-9]+\\)"
+                    :bibtex org-ref-webib-arxiv-download-bibtex
+                    :pdf "https://arxiv.org/pdf/%s.pdf"))
+    (nips . (:site "nips\\.cc"
+                   :key "papers\\.nips\\.cc/paper/\\([^/]+\\)\\(?:/bibtex|\\.pdf\\)?"
+                   :bibtex "https://papers.nips.cc/paper/%s/bibtex"
+                   :pdf "https://papers.nips.cc/paper/%s.pdf"))))
+
+(defun org-ref-webib-sites ()
+  (mapcar #'car org-ref-webib-sites))
+
+(defun org-ref-webib-get-prop (site key prop)
+  (let ((obj (plist-get (alist-get site org-ref-webib-sites) prop)))
+    (if (stringp obj)
+        (format obj key)
+      obj)))
+
+(defun org-ref-webib-extract-key (site text)
+  (let ((obj (plist-get (alist-get site org-ref-webib-sites) :key)))
+    (if (stringp obj)
+        (if (string-match obj text)
+            (match-string 1 text))
+      (funcall obj text))))
+
+(defun org-ref-webib-prompt-for-key (old-key)
+  (read-string "Bibtex Key: " old-key))
+
+(defun org-ref-webib-entry-existed-p (key)
+  (save-excursion
+    (bibtex-search-entry key)))
+
+(defun org-ref-webib-write-entry (entry bibfile &optional prompt)
+  (let ((key nil))
+    (save-window-excursion
+      ;; Goto end of file.
+      (find-file bibfile)
+      (goto-char (point-max))
+
+      ;; Insert empty line before.
+      (when (not (looking-at "^"))
+        (insert "\n\n"))
+
+      ;; Insert and clean entry.
+      (insert entry)
+      (org-ref-clean-bibtex-entry)
+
+      ;; Update key when necessary.
+      (bibtex-beginning-of-entry)
+      (re-search-forward bibtex-entry-maybe-empty-head)
+      (when (match-beginning bibtex-key-in-head)
+        (setq key (delete-and-extract-region
+                   (match-beginning bibtex-key-in-head)
+                   (match-end bibtex-key-in-head)))
+
+        ;; Prompt for new key when duplicated or `prompt' is t.
+        (if (or (org-ref-webib-entry-existed-p key)
+                prompt)
+            (setq key (org-ref-webib-prompt-for-key key)))
+        (if (and key (not (string-empty-p key)))
+            (insert key)
+          (bibtex-kill-entry)
+          (save-buffer)
+          (user-error "Key is not given."))
+
+        ;; Insert empty line after.
+        (goto-char (point-max))
+        (when (not (looking-at "^"))
+          (insert "\n\n")))
+      (save-buffer)
+      (message "Bibtex: %s saved to %s." key bibfile))
+    key))
+
+(defun org-ref-webib-download-pdf (url pdf &optional open callback)
+  (if (file-exists-p pdf)
+      (user-error "PDF file existed: %s" pdf))
+  (url-retrieve
+   url
+   `(lambda (_data)
+      (let ((coding-system-for-write 'binary))
+        (delete-region (point-min) url-http-end-of-headers)
+        (while (looking-at "^$")
+          (delete-char 1))
+        (write-region (point-min) (point-max) ,pdf)
+        (if (org-ref-pdf-p ,pdf)
+            (progn
+              (if ,open
+                  (org-open-file ,pdf))
+              (message "PDF saved to: %s" ,pdf))
+          (delete-file ,pdf 'trash)
+          (user-error "Failed to download pdf: %s" ,url)))
+      (if ,callback
+          (funcall ,callback)))))
+
+(defun org-ref-webib-add-pdf (site key newkey &optional open pdf-directory callback)
+  (let ((pdf-url (org-ref-webib-get-prop site key :pdf))
+        (pdf-directory (or pdf-directory org-ref-pdf-directory))
+        (pdf-file (expand-file-name (format "%s.pdf" newkey) pdf-directory)))
+    (org-ref-webib-download-pdf pdf-url pdf-file open callback)))
+
+(defun org-ref-webib-add-bibtex (site key &optional bibfile pdf-directory)
+  (let ((buf (current-buffer))
+        (bibfile (or bibfile (car org-ref-default-bibliography)))
+        (pdf-directory (or pdf-directory org-ref-pdf-directory)))
+
+    (let ((obj (org-ref-webib-get-prop site key :bibtex)))
+      (if (stringp obj)
+          (url-retrieve
+           obj
+           `(lambda (data)
+              (goto-char url-http-end-of-headers)
+              (let* ((entry (substring-no-properties (buffer-string) (point)))
+
+                     (bibkey (org-ref-webib-write-entry entry ,bibfile nil)))
+                (org-ref-webib-add-pdf
+                 ',site ,key bibkey nil ,pdf-directory))))
+        (let ((bibkey (org-ref-webib-write-entry (funcall obj key) bibfile nil)))
+          (org-ref-webib-add-pdf
+           site key bibkey nil pdf-directory))))))
 
 ;; arXiv
-(defun org-ref-webib-arxiv-get-pdf-add-bibtex-entry (link)
-  (if (string-match org-bracket-link-regexp link)
-      (let ((location (match-string 1 link)))
-        (if (string-match "/\\(?:abs\\|pdf\\)/\\([0-9]+\\.[0-9]+\\)" location)
-            (let ((arxiv-number (match-string 1 location))
-                  (default-biblio (car org-ref-default-bibliography)))
-              (unwind-protect
-                  (cl-letf (((symbol-function #'org-open-file) (lambda (&rest _) nil)))
-                    (arxiv-get-pdf-add-bibtex-entry arxiv-number
-                                                    default-biblio
-                                                    org-ref-pdf-directory))
-                (find-file default-biblio)))
-          (user-error "Not a arXiv page: %s." location)))))
+(defun org-ref-webib-arxiv-download-bibtex (key)
+  (arxiv-get-bibtex-entry-via-arxiv-api key))
 
-(defun org-ref-webib-arxiv-get-pdf-add-bibtex-entry-from-safari ()
-  (interactive)
-  (org-ref-webib-arxiv-get-pdf-add-bibtex-entry (org-mac-safari-get-frontmost-url)))
+;; Browser supports.
+(defun org-ref-webib-org-link-builder ()
+  (dolist (site (org-ref-webib-sites))
+    (defalias (intern (format "org-ref-webib-%s-add" site))
+      (function
+       (lambda (link)
+         (if (string-match org-bracket-link-regexp link)
+             (let* ((location (match-string 1 link))
+                    (key (org-ref-webib-extract-key site location)))
+               (unless key
+                 (user-error "Failed to extract key: %s" link))
+               (org-ref-webib-add-bibtex site key))))))))
 
-(defun org-ref-webib-arxiv-get-pdf-add-bibtex-entry-from-firefox ()
-  (interactive)
-  (org-ref-webib-arxiv-get-pdf-add-bibtex-entry (org-mac-firefox-get-frontmost-url)))
+(org-ref-webib-org-link-builder)
 
-(defun org-ref-webib-arxiv-get-pdf-add-bibtex-entry-from-chrome ()
-  (interactive)
-  (org-ref-webib-arxiv-get-pdf-add-bibtex-entry (org-mac-chrome-get-frontmost-url)))
+(defun org-ref-webib-browser-util-builder ()
+  (dolist (browser '(safari firefox chrome))
+    (dolist (site (org-ref-webib-sites))
+      (defalias (intern (format "org-ref-webib-%s-add-from-%s" site browser))
+        (function
+         (lambda nil
+           (interactive)
+           (funcall (intern (format "org-ref-webib-%s-add" site))
+                    (funcall (intern (format "org-mac-%s-get-frontmost-url" browser))))))))
 
-;; ACL (Mostly adjusted from `org-ref-arxiv.el')
-(defun org-ref-webib-acl-get-bibtex-entry (acl-number)
-  (with-current-buffer
-      (url-retrieve-synchronously
-       (format "https://www.aclweb.org/anthology/%s.bib" acl-number)
-       t)
-    (goto-char url-http-end-of-headers)
-    (substring-no-properties (buffer-string) (point))))
+    (defalias (intern (format "org-ref-webib-add-from-%s" browser))
+      (function
+       (lambda nil
+         (interactive)
+         (let ((link (org-mac-safari-get-frontmost-url)))
+           (funcall (org-ref-webib-add-dispatcher link) link)))))))
 
-(defun org-ref-webib-acl-add-bibtex-entry (acl-number bibfile)
-  (interactive
-   (list (read-string "ACL: ")
-         (completing-read
-          "Bibfile: "
-          (append (f-entries "." (lambda (f) (f-ext? f "bib")))
-                  org-ref-default-bibliography))))
-  (save-window-excursion
-    (find-file bibfile)
-    (goto-char (point-max))
-    (when (not (looking-at "^")) (insert "\n"))
-    (insert (org-ref-webib-acl-get-bibtex-entry acl-number))
-    (org-ref-clean-bibtex-entry)
-    (bibtex-beginning-of-entry)
-    (let ((key (bibtex-completion-get-value "=key=" (bibtex-parse-entry))))
-      (goto-char (point-max))
-      (when (not (looking-at "^")) (insert "\n"))
-      (save-buffer)
-      key)))
+(org-ref-webib-browser-util-builder)
 
-(defun org-ref-webib-acl-get-pdf (acl-number pdf &optional open)
-  (interactive "sACL: \nsPDF: ")
-  (org-ref-webib-get-pdf
-   (format "https://www.aclweb.org/anthology/%s.pdf" acl-number) pdf open))
-
-(defun org-ref-webib-acl-get-pdf-add-bibtex-entry (link)
-  (if (string-match org-bracket-link-regexp link)
-      (let ((location (match-string 1 link)))
-        (if (string-match "www\\.aclweb\\.org/.+?/\\([^\\./]+\\)\\(?:/|\\.bib|pdf\\)?" location)
-            (let ((acl-number (match-string 1 location))
-                  (default-biblio (car org-ref-default-bibliography)))
-              (unwind-protect
-                  (let* ((key (org-ref-webib-acl-add-bibtex-entry acl-number default-biblio))
-                         (pdf-file (expand-file-name (format "%s.pdf" key) org-ref-pdf-directory)))
-                    (org-ref-webib-acl-get-pdf acl-number pdf-file))
-                (find-file-other-window default-biblio)))
-          (user-error "Not a ACL page: %s." location)))))
-
-(defun org-ref-webib-acl-get-pdf-add-bibtex-entry-from-safari ()
-  (interactive)
-  (org-ref-webib-acl-get-pdf-add-bibtex-entry (org-mac-safari-get-frontmost-url)))
-
-(defun org-ref-webib-acl-get-pdf-add-bibtex-entry-from-firefox ()
-  (interactive)
-  (org-ref-webib-acl-get-pdf-add-bibtex-entry (org-mac-firefox-get-frontmost-url)))
-
-(defun org-ref-webib-acl-get-pdf-add-bibtex-entry-from-chrome ()
-  (interactive)
-  (org-ref-webib-acl-get-pdf-add-bibtex-entry (org-mac-chrome-get-frontmost-url)))
-
-;; NIPS (Mostly adjusted from `org-ref-arxiv.el')
-(defun org-ref-webib-nips-get-bibtex-entry (nips-number)
-  (with-current-buffer
-      (url-retrieve-synchronously
-       (format "https://papers.nips.cc/paper/%s/bibtex" nips-number)
-       t)
-    (goto-char url-http-end-of-headers)
-    (substring-no-properties (buffer-string) (point))))
-
-(defun org-ref-webib-nips-add-bibtex-entry (nips-number bibfile)
-  (interactive
-   (list (read-string "NIPS: ")
-         (completing-read
-          "Bibfile: "
-          (append (f-entries "." (lambda (f) (f-ext? f "bib")))
-                  org-ref-default-bibliography))))
-  (save-window-excursion
-    (find-file bibfile)
-    (goto-char (point-max))
-    (when (not (looking-at "^")) (insert "\n"))
-    (insert (org-ref-webib-nips-get-bibtex-entry nips-number))
-    (org-ref-clean-bibtex-entry)
-    (bibtex-beginning-of-entry)
-    (let ((key (bibtex-completion-get-value "=key=" (bibtex-parse-entry))))
-      (goto-char (point-max))
-      (when (not (looking-at "^")) (insert "\n"))
-      (save-buffer)
-      key)))
-
-(defun org-ref-webib-nips-get-pdf (nips-number pdf &optional open)
-  (interactive "sACL: \nsPDF: ")
-  (org-ref-webib-get-pdf
-   (format "https://papers.nips.cc/paper/%s.pdf" nips-number) pdf open))
-
-(defun org-ref-webib-nips-get-pdf-add-bibtex-entry (link)
-  (if (string-match org-bracket-link-regexp link)
-      (let ((location (match-string 1 link)))
-        (if (string-match "papers\\.nips\\.cc/paper/\\([^/]+\\)\\(?:/bibtex|\\.pdf\\)?" location)
-            (let ((nips-number (match-string 1 location))
-                  (default-biblio (car org-ref-default-bibliography)))
-              (unwind-protect
-                  (let* ((key (org-ref-webib-nips-add-bibtex-entry nips-number default-biblio))
-                         (pdf-file (expand-file-name (format "%s.pdf" key) org-ref-pdf-directory)))
-                    (org-ref-webib-nips-get-pdf nips-number pdf-file))
-                (find-file-other-window default-biblio)))
-          (user-error "Not a NIPS page: %s." location)))))
-
-(defun org-ref-webib-nips-get-pdf-add-bibtex-entry-from-safari ()
-  (interactive)
-  (org-ref-webib-nips-get-pdf-add-bibtex-entry (org-mac-safari-get-frontmost-url)))
-
-(defun org-ref-webib-nips-get-pdf-add-bibtex-entry-from-firefox ()
-  (interactive)
-  (org-ref-webib-nips-get-pdf-add-bibtex-entry (org-mac-firefox-get-frontmost-url)))
-
-(defun org-ref-webib-nips-get-pdf-add-bibtex-entry-from-chrome ()
-  (interactive)
-  (org-ref-webib-nips-get-pdf-add-bibtex-entry (org-mac-chrome-get-frontmost-url)))
-
-;; Dispatcher
-
-(defun org-ref-webib-get-pdf-add-bibtex-entry-dispatcher (link)
-  (cond ((string-match "arxiv\\.org" link)
-         #'org-ref-webib-arxiv-get-pdf-add-bibtex-entry)
-        ((string-match "aclweb\\.org" link)
-         #'org-ref-webib-acl-get-pdf-add-bibtex-entry)
-        ((string-match "nips\\.cc" link)
-         #'org-ref-webib-nips-get-pdf-add-bibtex-entry)
-        (t (user-error "Unknown bibtex website: %s" link))))
-
-(defun org-ref-webib-get-pdf-add-bibtex-entry-from-safari ()
-  (interactive)
-  (let ((link (org-mac-safari-get-frontmost-url)))
-    (funcall (org-ref-webib-get-pdf-add-bibtex-entry-dispatcher link) link)))
-
-(defun org-ref-webib-get-pdf-add-bibtex-entry-from-firefox ()
-  (interactive)
-  (let ((link (org-mac-firefox-get-frontmost-url)))
-    (funcall (org-ref-webib-get-pdf-add-bibtex-entry-dispatcher link) link)))
-
-(defun org-ref-webib-get-pdf-add-bibtex-entry-from-chrome ()
-  (interactive)
-  (let ((link (org-mac-chrome-get-frontmost-url)))
-    (funcall (org-ref-webib-get-pdf-add-bibtex-entry-dispatcher link) link)))
+(defun org-ref-webib-add-dispatcher (link)
+  (let ((site (caar (cl-remove-if-not (lambda (x)
+                                        (string-match (plist-get (cdr x) :site) link))
+                                      org-ref-webib-sites))))
+    (unless site
+      (user-error "Unsupported link: %s" link))
+    (function (intern (format "org-ref-webib-%s-add" site)))))
 
 (provide 'org-ref-webib)
 
