@@ -32,9 +32,10 @@
 (require 'org-ref)
 (require 'org-ref-arxiv)
 
-;; Common utilities.
+(defgroup org-ref-webib nil
+  "Utilities for downloading bibtex.")
 
-(defvar org-ref-webib-sites
+(defcustom org-ref-webib-sites
   '((acl . (:site "aclweb\\.org"
                   :key "www\\.aclweb\\.org/.+?/\\([^\\./]+\\)\\(?:/|\\.bib|pdf\\)?"
                   :bibtex "https://www.aclweb.org/anthology/%s.bib"
@@ -54,7 +55,10 @@
     (semanticscholar . (:site "semanticscholar\\.org"
                               :key "www\\.semanticscholar\\.org/paper/\\(.*\\)"
                               :bibtex org-ref-webib-semanticscholar-download-bibtex
-                              :pdf org-ref-webib-semanticscholar-get-pdf-url))))
+                              :pdf org-ref-webib-semanticscholar-get-pdf-url)))
+  "Site specs for extracting bibtex.")
+
+;; Common utilities.
 
 (defun org-ref-webib-sites ()
   (mapcar #'car org-ref-webib-sites))
