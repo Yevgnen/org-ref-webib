@@ -46,7 +46,11 @@
     (nips . (:site "nips\\.cc"
                    :key "papers\\.nips\\.cc/paper/\\([^/]+\\)\\(?:/bibtex|\\.pdf\\)?"
                    :bibtex "https://papers.nips.cc/paper/%s/bibtex"
-                   :pdf "https://papers.nips.cc/paper/%s.pdf"))))
+                   :pdf "https://papers.nips.cc/paper/%s.pdf"))
+    (openreview . (:site "openreview\\.net"
+                         :key "openreview\\.net/forum\\?id=\\([a-zA-Z0-9]+\\)"
+                         :bibtex org-ref-webib-openreview-download-bibtex
+                         :pdf "https://openreview.net/pdf?id=%s"))))
 
 (defun org-ref-webib-sites ()
   (mapcar #'car org-ref-webib-sites))
@@ -162,6 +166,15 @@
 ;; arXiv
 (defun org-ref-webib-arxiv-download-bibtex (key)
   (arxiv-get-bibtex-entry-via-arxiv-api key))
+
+;; OpenReview
+(defun org-ref-webib-openreview-download-bibtex (key)
+  (with-temp-buffer
+    (url-insert-file-contents
+     (format "https://openreview.net/forum?id=%s" key))
+    (if (string-match "\"_bibtex\":\"\\(.*?\\)\",\"full_presentation_video\"" (buffer-string))
+        (replace-regexp-in-string "\\\\n" "" (match-string 1 (buffer-string)))
+      (user-error "Failed to extract bibtex: %s" key))))
 
 ;; Browser supports.
 (defun org-ref-webib-org-link-builder ()
