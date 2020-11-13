@@ -50,7 +50,11 @@
     (openreview . (:site "openreview\\.net"
                          :key "openreview\\.net/forum\\?id=\\([a-zA-Z0-9]+\\)"
                          :bibtex org-ref-webib-openreview-download-bibtex
-                         :pdf "https://openreview.net/pdf?id=%s"))))
+                         :pdf "https://openreview.net/pdf?id=%s"))
+    (semanticscholar . (:site "semanticscholar\\.org"
+                              :key "www\\.semanticscholar\\.org/paper/\\(.*\\)"
+                              :bibtex org-ref-webib-semanticscholar-download-bibtex
+                              :pdf org-ref-webib-semanticscholar-get-pdf-url))))
 
 (defun org-ref-webib-sites ()
   (mapcar #'car org-ref-webib-sites))
@@ -138,10 +142,12 @@
           (funcall ,callback)))))
 
 (defun org-ref-webib-add-pdf (site key newkey &optional open pdf-directory callback)
-  (let ((pdf-url (org-ref-webib-get-prop site key :pdf))
+  (let ((pdf-url-or-fn (org-ref-webib-get-prop site key :pdf))
         (pdf-directory (or pdf-directory org-ref-pdf-directory))
         (pdf-file (expand-file-name (format "%s.pdf" newkey) pdf-directory)))
-    (org-ref-webib-download-pdf pdf-url pdf-file open callback)))
+    (unless (stringp pdf-url-or-fn)
+      (setq pdf-url-or-fn (funcall pdf-url-or-fn key)))
+    (org-ref-webib-download-pdf pdf-url-or-fn pdf-file open callback)))
 
 (defun org-ref-webib-add-bibtex (site key &optional bibfile pdf-directory)
   (let ((buf (current-buffer))
@@ -175,6 +181,23 @@
     (if (string-match "\"_bibtex\":\"\\(.*?\\)\",\"full_presentation_video\"" (buffer-string))
         (replace-regexp-in-string "\\\\n" "" (match-string 1 (buffer-string)))
       (user-error "Failed to extract bibtex: %s" key))))
+
+;; Semantic Scholar
+(defun org-ref-webib-semanticscholar-download-bibtex (fake-key)
+  (with-temp-buffer
+    (url-insert-file-contents
+     (format "https://www.semanticscholar.org/paper/%s" fake-key))
+    (if (string-match "<pre[^>]+?>\\(\\(.*\n\\)*.*\\)?</pre>" (buffer-string))
+        (match-string 1 (buffer-string))
+      (user-error "Failed to extract bibtex: %s" fake-key))))
+
+(defun org-ref-webib-semanticscholar-get-pdf-url (fake-key)
+  (with-temp-buffer
+    (url-insert-file-contents
+     (format "https://www.semanticscholar.org/paper/%s" fake-key))
+    (if (string-match "href=\"\\([^\"]+\\.pdf\\)\"" (buffer-string))
+        (match-string 1 (buffer-string))
+      (user-error "Failed to extract PDF: %s" fake-key))))
 
 ;; Browser supports.
 (defun org-ref-webib-org-link-builder ()
